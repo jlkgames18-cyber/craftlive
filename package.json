@@ -1,10 +1,13 @@
 {
-  "name": "turbo-signaling-server",
+  "name": "scratch-p2p-signaling",
   "version": "1.0.0",
-  "description": "Signaling server for TurboWarp P2P",
+  "description": "WebRTC signaling server for Scratch collaboration extension",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "ws": "^8.18.0"
