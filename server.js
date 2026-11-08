@@ -1,36 +1,60 @@
-      // تحويل رابط الـ HTTP الخاص برندر إلى بروتوكول الـ WebSocket الآمن (wss)
-      const renderUrl = "your-app.onrender.com"; // ضع رابط السيرفر الخاص بك هنا بدون https
-      const brokerUrl = `wss://${renderUrl}`;
-      socket = new WebSocket(brokerUrl);
-      
-      socket.onopen = async () => {
-        // تسجيل الدخول في الغرفة المحددة فور فتح الاتصال
-        socket.send(JSON.stringify({ type: 'join', room: roomCode }));
+const http = require('http');
+const { WebSocketServer } = require('ws');
 
-        if (isHost) {
-          const offer = await peerConnection.createOffer();
-          await peerConnection.setLocalDescription(offer);
-          socket.send(JSON.stringify({ offer: offer }));
-        }
-      };
+// Render يفرض بورت معين عبر process.env.PORT ويجب الاستماع عليه
+const port = process.env.PORT || 10000;
 
-      socket.onmessage = async (msg) => {
-        const data = JSON.parse(msg.data);
+// إنشاء سيرفر HTTP أساسي لتبسيط الفحص وإبقاء العملية حية
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('TurboWarp P2P Signaling Server is Running!\n');
+});
 
-        if (data.offer && !isHost) {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-          const answer = await peerConnection.createAnswer();
-          await peerConnection.setLocalDescription(answer);
-          socket.send(JSON.stringify({ answer: answer }));
+// ربط سيرفر الـ WebSocket بسيرفر الـ HTTP
+const wss = new WebSocketServer({ server });
+const rooms = new Map();
+
+wss.on('connection', (ws) => {
+  let currentRoom = null;
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+
+      // انضمام أو إنشاء غرف الربط
+      if (data.type === 'join' && data.room) {
+        currentRoom = data.room;
+        if (!rooms.has(currentRoom)) {
+          rooms.set(currentRoom, new Set());
         }
-        
-        if (data.answer && isHost) {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        rooms.get(currentRoom).add(ws);
+        return;
+      }
+
+      // تمرير حزم إشارات WebRTC لباقي أطراف الغرفة
+      if (currentRoom && rooms.has(currentRoom)) {
+        for (const client of rooms.get(currentRoom)) {
+          if (client !== ws && client.readyState === ws.OPEN) {
+            client.send(JSON.stringify(data));
+          }
         }
-        
-        if (data.ice) {
-          try {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(data.ice));
-          } catch(e) { console.error(e); }
-        }
-      };
+      }
+    } catch (e) {
+      console.error('Error processing message:', e);
+    }
+  });
+
+  ws.on('close', () => {
+    if (currentRoom && rooms.has(currentRoom)) {
+      rooms.get(currentRoom).delete(ws);
+      if (rooms.get(currentRoom).size === 0) {
+        rooms.delete(currentRoom);
+      }
+    }
+  });
+});
+
+// بدء الإنصات على المنفذ المطلوب لإعلام Render بأن التطبيق مستقر
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Signaling server listening on port ${port}`);
+});
